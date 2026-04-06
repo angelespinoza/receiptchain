@@ -21,16 +21,57 @@ export interface ReceiptData {
  * Process a receipt image — tries Cloud Vision first, falls back to Tesseract
  */
 export async function processReceipt(imageData: string): Promise<ReceiptData> {
+  // Resize image to reduce payload size (max 1200px wide)
+  const resizedImage = await resizeImage(imageData, 1200);
+
   try {
     // Try Google Cloud Vision API first
-    const cloudResult = await processWithCloudVision(imageData);
-    if (cloudResult) return cloudResult;
+    console.log('[OCR] Trying Google Cloud Vision...');
+    const cloudResult = await processWithCloudVision(resizedImage);
+    if (cloudResult) {
+      console.log('[OCR] Cloud Vision succeeded:', cloudResult.merchant, cloudResult.amount);
+      return cloudResult;
+    }
+    console.warn('[OCR] Cloud Vision returned no result');
   } catch (err) {
-    console.warn('Cloud Vision failed, falling back to Tesseract:', err);
+    console.warn('[OCR] Cloud Vision failed, falling back to Tesseract:', err);
   }
 
   // Fallback: Tesseract.js (client-side)
-  return processWithTesseract(imageData);
+  console.log('[OCR] Using Tesseract.js fallback...');
+  return processWithTesseract(resizedImage);
+}
+
+/**
+ * Resize image to reduce payload size for API calls
+ */
+function resizeImage(dataUrl: string, maxWidth: number): Promise<string> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined') {
+      resolve(dataUrl);
+      return;
+    }
+    const img = new Image();
+    img.onload = () => {
+      if (img.width <= maxWidth) {
+        resolve(dataUrl);
+        return;
+      }
+      const scale = maxWidth / img.width;
+      const canvas = document.createElement('canvas');
+      canvas.width = maxWidth;
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(dataUrl);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
 }
 
 /**
