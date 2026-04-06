@@ -71,10 +71,19 @@ interface RelayResponse {
 export async function registerExpense(
   amount: number,
   category: string,
-  dataHash: `0x${string}`
+  dataHash: `0x${string}`,
+  userAddress?: string
 ): Promise<Hash> {
   try {
-    const account = await getAccount();
+    // Use provided address, try MiniPay, or use fallback
+    let account = userAddress;
+    if (!account) {
+      try {
+        account = await getAccount();
+      } catch {
+        account = '0x0000000000000000000000000000000000000000';
+      }
+    }
 
     // Send to relayer API instead of directly to blockchain
     const response = await fetch('/api/relay', {

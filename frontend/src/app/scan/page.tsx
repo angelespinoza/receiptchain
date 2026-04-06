@@ -115,8 +115,8 @@ export default function ScanPage() {
       // Generate hash
       const dataHash = generateExpenseHash(amount, editedDate, editedMerchant, account);
 
-      // Register on blockchain
-      const txHash = await registerExpense(amount, selectedCategory, dataHash);
+      // Register on blockchain (pass account to avoid re-requesting provider)
+      const txHash = await registerExpense(amount, selectedCategory, dataHash, account);
 
       // Save to IndexedDB
       const record: ReceiptRecord = {
