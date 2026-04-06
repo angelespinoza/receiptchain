@@ -16,6 +16,7 @@ import type { ReceiptRecord } from '@/lib/storage';
 export default function ScanPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
 
   const [step, setStep] = useState<0 | 1 | 2>(0);
   const [imageData, setImageData] = useState<string>('');
@@ -194,6 +195,7 @@ export default function ScanPage() {
     setSuccessMessage('');
     setProgressText('');
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (galleryInputRef.current) galleryInputRef.current.value = '';
   };
 
   return (
@@ -221,10 +223,19 @@ export default function ScanPage() {
               </div>
             </div>
           </div>
+          {/* Hidden inputs */}
           <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={handleImageSelect} className="hidden" />
-          <button onClick={() => fileInputRef.current?.click()} className="w-full bg-[#35D07F] text-white font-bold py-3 rounded-lg text-center transition-opacity active:opacity-80">
-            Abrir Cámara
-          </button>
+          <input ref={galleryInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
+
+          {/* Action buttons */}
+          <div className="flex gap-3">
+            <button onClick={() => fileInputRef.current?.click()} className="flex-1 bg-[#35D07F] text-white font-bold py-3 rounded-lg text-center transition-opacity active:opacity-80">
+              📸 Tomar Foto
+            </button>
+            <button onClick={() => galleryInputRef.current?.click()} className="flex-1 bg-[#1E3A2F] text-white font-bold py-3 rounded-lg text-center transition-opacity active:opacity-80">
+              🖼️ Galería
+            </button>
+          </div>
           <p className="text-center text-xs text-gray-500 mt-4">Asegúrate de que el recibo sea legible y tenga buena iluminación</p>
         </div>
       )}
