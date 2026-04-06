@@ -25,6 +25,7 @@ export default function ScanPage() {
   const [editedMerchant, setEditedMerchant] = useState('');
   const [editedDate, setEditedDate] = useState('');
   const [editedAmount, setEditedAmount] = useState('');
+  const [editedCurrency, setEditedCurrency] = useState('$');
   const [isRegistering, setIsRegistering] = useState(false);
   const [registrationError, setRegistrationError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -59,6 +60,7 @@ export default function ScanPage() {
       setEditedMerchant(data.merchant);
       setEditedDate(data.date);
       setEditedAmount(data.amount.toString());
+      setEditedCurrency(data.currency || '$');
       const suggestedCat = suggestCategory(data.merchant, data.items);
       setSelectedCategory(suggestedCat);
       setStep(2);
@@ -68,6 +70,7 @@ export default function ScanPage() {
         merchant: '',
         date: new Date().toISOString().split('T')[0],
         amount: 0,
+        currency: '$',
         items: [],
         rawText: '',
         confidence: 0,
@@ -161,6 +164,7 @@ export default function ScanPage() {
         merchant: editedMerchant,
         date: editedDate,
         amount,
+        currency: editedCurrency,
         category: selectedCategory,
         txHash,
         dataHash,
@@ -191,6 +195,7 @@ export default function ScanPage() {
     setEditedMerchant('');
     setEditedDate('');
     setEditedAmount('');
+    setEditedCurrency('$');
     setRegistrationError('');
     setSuccessMessage('');
     setProgressText('');
@@ -276,9 +281,17 @@ export default function ScanPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-[#1E3A2F] mb-1">Monto</label>
-              <div className="relative">
-                <span className="absolute left-4 top-3 text-gray-500 font-medium">$</span>
-                <input type="number" value={editedAmount} onChange={(e) => setEditedAmount(e.target.value)} step="0.01" min="0" className="w-full pl-8 pr-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#35D07F]" placeholder="0.00" />
+              <div className="flex gap-2">
+                <select value={editedCurrency} onChange={(e) => setEditedCurrency(e.target.value)} className="px-3 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#35D07F] bg-white text-sm font-medium">
+                  <option value="S/">S/ (PEN)</option>
+                  <option value="$">$ (USD)</option>
+                  <option value="¥">¥ (JPY)</option>
+                  <option value="€">€ (EUR)</option>
+                  <option value="MX$">MX$ (MXN)</option>
+                  <option value="COP">COP</option>
+                  <option value="R$">R$ (BRL)</option>
+                </select>
+                <input type="number" value={editedAmount} onChange={(e) => setEditedAmount(e.target.value)} step="0.01" min="0" className="flex-1 px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#35D07F]" placeholder="0.00" />
               </div>
             </div>
             <div>

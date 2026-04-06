@@ -14,6 +14,7 @@ export interface ReceiptRecord {
   merchant: string;
   date: string; // ISO format YYYY-MM-DD
   amount: number;
+  currency?: string; // Currency symbol (S/, $, ¥, €, etc.)
   category: string;
   txHash: string; // Blockchain transaction hash
   dataHash: string; // Expense data hash

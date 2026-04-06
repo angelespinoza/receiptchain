@@ -5,6 +5,7 @@ import { CATEGORIES } from '@/lib/constants';
 interface ExpenseCardProps {
   merchant: string;
   amount: number;
+  currency?: string;
   date: string;
   category: string;
   txHash: string;
@@ -14,6 +15,7 @@ interface ExpenseCardProps {
 export default function ExpenseCard({
   merchant,
   amount,
+  currency = '$',
   date,
   category,
   txHash,
@@ -28,7 +30,7 @@ export default function ExpenseCard({
   const truncatedHash = `${txHash.slice(0, 6)}...${txHash.slice(-4)}`;
 
   // Format amount as currency
-  const formattedAmount = `$${amount.toFixed(2)}`;
+  const formattedAmount = `${currency}${amount.toFixed(2)}`;
 
   return (
     <div

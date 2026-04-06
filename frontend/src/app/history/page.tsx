@@ -19,6 +19,7 @@ interface UnifiedExpense {
   id?: number;
   merchant: string;
   amount: number;
+  currency?: string;
   date: string;
   category: string;
   txHash: string;
@@ -214,6 +215,7 @@ export default function HistoryPage() {
                 <ExpenseCard
                   merchant={expense.merchant}
                   amount={expense.amount}
+                  currency={expense.currency}
                   date={expense.date}
                   category={expense.category}
                   txHash={expense.txHash}
@@ -244,7 +246,7 @@ export default function HistoryPage() {
                           </div>
                           <div>
                             <p className="text-xs text-gray-500 mb-1">Monto</p>
-                            <p className="text-lg font-bold text-[#35D07F]">${expense.amount.toFixed(2)}</p>
+                            <p className="text-lg font-bold text-[#35D07F]">{expense.currency || '$'}{expense.amount.toFixed(2)}</p>
                           </div>
 
                           <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
