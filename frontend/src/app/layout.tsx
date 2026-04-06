@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Web3Provider from '@/components/Web3Provider';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -14,7 +15,9 @@ export default function RootLayout({
   return (
     <html lang="es">
       <body className="min-h-screen bg-[#F7FBF9]" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
-        <div className="max-w-md mx-auto pb-20">{children}</div>
+        <Web3Provider>
+          <div className="max-w-md mx-auto pb-20">{children}</div>
+        </Web3Provider>
       </body>
     </html>
   );

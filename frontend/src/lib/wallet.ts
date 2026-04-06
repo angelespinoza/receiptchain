@@ -15,12 +15,12 @@ import {
 import { CELO_CHAIN } from './constants';
 
 /**
- * Global type declaration for wallet providers
+ * Global type declaration for MiniPay provider
+ * (window.ethereum is already declared by wagmi types)
  */
 declare global {
   interface Window {
     provider: any;       // MiniPay provider
-    ethereum: any;       // MetaMask / other EVM wallets
   }
 }
 
