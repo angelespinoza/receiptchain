@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import BottomNav from '@/components/BottomNav';
 import ExpenseCard from '@/components/ExpenseCard';
-import ConnectWallet from '@/components/ConnectWallet';
 import { getAccount, isMiniPay } from '@/lib/wallet';
+
+const ConnectWallet = dynamic(() => import('@/components/ConnectWallet'), { ssr: false });
 import { getReceipts, getMonthlyExpenseSummary } from '@/lib/storage';
 import { CATEGORIES } from '@/lib/constants';
 import type { ReceiptRecord } from '@/lib/storage';

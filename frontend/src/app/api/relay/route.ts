@@ -80,7 +80,10 @@ export async function POST(request: NextRequest) {
     }
 
     // ─── Setup relayer wallet ───
-    const account = privateKeyToAccount(relayerPrivateKey as `0x${string}`);
+    const formattedKey = relayerPrivateKey.startsWith('0x')
+      ? relayerPrivateKey
+      : `0x${relayerPrivateKey}`;
+    const account = privateKeyToAccount(formattedKey as `0x${string}`);
 
     const walletClient = createWalletClient({
       account,
