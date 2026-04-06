@@ -3,31 +3,32 @@ pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+/**
+ * ExpenseRegistry v3 — Privacy-first design
+ * Only stores: dataHash (proof of expense) + imageCID (encrypted data on IPFS)
+ * All personal details (merchant, amount, date, category, image) are
+ * encrypted and stored on IPFS. Only the wallet owner can decrypt them.
+ */
 contract ExpenseRegistry is Ownable {
     struct Expense {
-        bytes32 dataHash;
-        uint256 timestamp;
-        uint256 amount;
-        string category;
+        bytes32 dataHash;     // keccak256 hash proving the expense exists
+        string  dataCID;      // IPFS CID of encrypted payload (all details + image)
+        uint256 timestamp;    // block timestamp of registration
     }
 
     mapping(address => Expense[]) public userExpenses;
-
-    // Authorized relayers that can submit transactions on behalf of users
     mapping(address => bool) public authorizedRelayers;
 
     event ExpenseRegistered(
         address indexed user,
         bytes32 dataHash,
-        uint256 amount,
-        string category,
+        string  dataCID,
         uint256 timestamp
     );
 
     event RelayerUpdated(address indexed relayer, bool authorized);
 
     constructor() Ownable(msg.sender) {
-        // The deployer is automatically the owner and first relayer
         authorizedRelayers[msg.sender] = true;
     }
 
@@ -36,63 +37,46 @@ contract ExpenseRegistry is Ownable {
         _;
     }
 
-    // ─── Admin Functions ───
+    // ─── Admin ───
 
-    /// @notice Add or remove a relayer address
-    /// @param _relayer Address to authorize/deauthorize
-    /// @param _authorized Whether to authorize or deauthorize
     function setRelayer(address _relayer, bool _authorized) external onlyOwner {
         authorizedRelayers[_relayer] = _authorized;
         emit RelayerUpdated(_relayer, _authorized);
     }
 
-    // ─── User-Direct Registration (user pays gas) ───
+    // ─── Registration ───
 
-    /// @notice Register an expense directly (user pays gas)
+    /// @notice Register expense directly (user pays gas)
     function registerExpense(
         bytes32 _dataHash,
-        uint256 _amount,
-        string calldata _category
+        string calldata _dataCID
     ) external {
-        _registerExpenseFor(msg.sender, _dataHash, _amount, _category);
+        _registerExpenseFor(msg.sender, _dataHash, _dataCID);
     }
 
-    // ─── Relayed Registration (relayer pays gas) ───
-
-    /// @notice Register an expense on behalf of a user (relayer pays gas)
-    /// @param _user The user's wallet address
-    /// @param _dataHash Hash of the expense data
-    /// @param _amount Amount in wei
-    /// @param _category Expense category
+    /// @notice Register expense on behalf of user (relayer pays gas)
     function registerExpenseFor(
         address _user,
         bytes32 _dataHash,
-        uint256 _amount,
-        string calldata _category
+        string calldata _dataCID
     ) external onlyRelayer {
-        _registerExpenseFor(_user, _dataHash, _amount, _category);
+        _registerExpenseFor(_user, _dataHash, _dataCID);
     }
 
-    /// @notice Register multiple expenses in a single transaction (batch, relayer pays gas)
-    /// @param _users Array of user addresses
-    /// @param _dataHashes Array of data hashes
-    /// @param _amounts Array of amounts
-    /// @param _categories Array of categories
+    /// @notice Batch register (relayer pays gas)
     function batchRegisterExpenses(
         address[] calldata _users,
         bytes32[] calldata _dataHashes,
-        uint256[] calldata _amounts,
-        string[] calldata _categories
+        string[] calldata _dataCIDs
     ) external onlyRelayer {
         require(
             _users.length == _dataHashes.length &&
-            _users.length == _amounts.length &&
-            _users.length == _categories.length,
+            _users.length == _dataCIDs.length,
             "Arrays length mismatch"
         );
 
         for (uint256 i = 0; i < _users.length; i++) {
-            _registerExpenseFor(_users[i], _dataHashes[i], _amounts[i], _categories[i]);
+            _registerExpenseFor(_users[i], _dataHashes[i], _dataCIDs[i]);
         }
     }
 
@@ -101,66 +85,53 @@ contract ExpenseRegistry is Ownable {
     function _registerExpenseFor(
         address _user,
         bytes32 _dataHash,
-        uint256 _amount,
-        string calldata _category
+        string calldata _dataCID
     ) internal {
         Expense memory newExpense = Expense({
             dataHash: _dataHash,
-            timestamp: block.timestamp,
-            amount: _amount,
-            category: _category
+            dataCID: _dataCID,
+            timestamp: block.timestamp
         });
 
         userExpenses[_user].push(newExpense);
 
-        emit ExpenseRegistered(
-            _user,
-            _dataHash,
-            _amount,
-            _category,
-            block.timestamp
-        );
+        emit ExpenseRegistered(_user, _dataHash, _dataCID, block.timestamp);
     }
 
-    // ─── Read Functions ───
+    // ─── Read ───
 
     function getExpenseCount(address _user) external view returns (uint256) {
         return userExpenses[_user].length;
     }
 
     function getExpense(address _user, uint256 _index)
-        external
-        view
-        returns (bytes32, uint256, uint256, string memory)
+        external view
+        returns (bytes32 dataHash, string memory dataCID, uint256 timestamp)
     {
         require(_index < userExpenses[_user].length, "Index out of bounds");
-        Expense memory expense = userExpenses[_user][_index];
-        return (expense.dataHash, expense.timestamp, expense.amount, expense.category);
+        Expense memory e = userExpenses[_user][_index];
+        return (e.dataHash, e.dataCID, e.timestamp);
     }
 
-    function getExpensesByRange(
-        address _user,
-        uint256 _start,
-        uint256 _end
-    ) external view returns (Expense[] memory) {
+    function getExpensesByRange(address _user, uint256 _start, uint256 _end)
+        external view
+        returns (Expense[] memory)
+    {
         require(_start <= _end, "Invalid range");
         require(_end <= userExpenses[_user].length, "End out of bounds");
 
         uint256 length = _end - _start;
         Expense[] memory result = new Expense[](length);
-
         for (uint256 i = 0; i < length; i++) {
             result[i] = userExpenses[_user][_start + i];
         }
-
         return result;
     }
 
-    function verifyExpense(
-        address _user,
-        uint256 _index,
-        bytes32 _dataHash
-    ) external view returns (bool) {
+    function verifyExpense(address _user, uint256 _index, bytes32 _dataHash)
+        external view
+        returns (bool)
+    {
         require(_index < userExpenses[_user].length, "Index out of bounds");
         return userExpenses[_user][_index].dataHash == _dataHash;
     }

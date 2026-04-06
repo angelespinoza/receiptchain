@@ -1,6 +1,8 @@
 /**
- * ReceiptChain Blockchain Interaction
- * Smart contract integration for registering expenses on Celo
+ * ReceiptChain Blockchain Interaction (v3 — Privacy-first)
+ *
+ * Only dataHash + dataCID are stored on-chain.
+ * All personal data lives encrypted on IPFS.
  */
 
 import {
@@ -10,21 +12,19 @@ import {
   type Address,
 } from 'viem';
 import { getWalletClient, getPublicClient, getAccount } from './wallet';
-import { CONTRACT_ADDRESS, CONTRACT_ABI, cUSD_ADDRESS, CELO_CHAIN } from './constants';
+import { CONTRACT_ADDRESS, CONTRACT_ABI, CELO_CHAIN } from './constants';
 
 /**
- * Registered expense record from blockchain
+ * On-chain expense record (minimal — only hash + CID + timestamp)
  */
-export interface Expense {
+export interface OnChainExpense {
   dataHash: string;
+  dataCID: string;
   timestamp: number;
-  amount: number;
-  category: string;
 }
 
 /**
  * Generate a hash for an expense using keccak256
- * Combines amount, date, merchant, and account address
  */
 export function generateExpenseHash(
   amount: number,
@@ -33,16 +33,13 @@ export function generateExpenseHash(
   account: string
 ): `0x${string}` {
   try {
-    // Ensure amount is in wei (18 decimals for Celo)
     const amountInWei = BigInt(Math.floor(amount * 1e18));
-
     const hash = keccak256(
       encodePacked(
         ['uint256', 'string', 'string', 'address'],
         [amountInWei, date, merchant, account as Address]
       )
     );
-
     return hash;
   } catch (error) {
     throw new Error(
@@ -51,9 +48,6 @@ export function generateExpenseHash(
   }
 }
 
-/**
- * Relay API response type
- */
 interface RelayResponse {
   success: boolean;
   txHash: string;
@@ -66,16 +60,14 @@ interface RelayResponse {
 
 /**
  * Register an expense via the Relayer API (gas subsidized)
- * The user does NOT pay gas — the relayer wallet covers it.
+ * Only sends dataHash + dataCID — no personal data.
  */
 export async function registerExpense(
-  amount: number,
-  category: string,
   dataHash: `0x${string}`,
+  dataCID: string,
   userAddress?: string
 ): Promise<Hash> {
   try {
-    // Use provided address, try MiniPay, or use fallback
     let account = userAddress;
     if (!account) {
       try {
@@ -85,15 +77,13 @@ export async function registerExpense(
       }
     }
 
-    // Send to relayer API instead of directly to blockchain
     const response = await fetch('/api/relay', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         userAddress: account,
         dataHash,
-        amount,
-        category,
+        dataCID,
       }),
     });
 
@@ -112,28 +102,23 @@ export async function registerExpense(
 }
 
 /**
- * Register an expense directly (user pays gas) — fallback method
- * Use this if the relayer is unavailable
+ * Register expense directly (user pays gas) — fallback
  */
 export async function registerExpenseDirect(
-  amount: number,
-  category: string,
-  dataHash: `0x${string}`
+  dataHash: `0x${string}`,
+  dataCID: string
 ): Promise<Hash> {
   try {
     const walletClient = await getWalletClient();
     const account = await getAccount();
-    const amountInWei = BigInt(Math.floor(amount * 1e18));
 
     const txHash = await walletClient.writeContract({
       account: account as Address,
       address: CONTRACT_ADDRESS as Address,
       abi: CONTRACT_ABI,
       functionName: 'registerExpense' as const,
-      args: [dataHash, amountInWei, category],
+      args: [dataHash, dataCID],
       chain: CELO_CHAIN,
-      // @ts-expect-error - feeCurrency is a Celo-specific field supported by MiniPay
-      feeCurrency: cUSD_ADDRESS as Address,
     });
 
     return txHash;
@@ -145,31 +130,29 @@ export async function registerExpenseDirect(
 }
 
 /**
- * Get all expenses for a wallet address
+ * Get all on-chain expenses for a wallet address
+ * Returns only hash + CID + timestamp (data is encrypted on IPFS)
  */
-export async function getExpenses(account: string): Promise<Expense[]> {
+export async function getOnChainExpenses(account: string): Promise<OnChainExpense[]> {
   try {
     const publicClient = await getPublicClient();
     const count = await getExpenseCount(account);
-
-    const expenses: Expense[] = [];
+    const expenses: OnChainExpense[] = [];
 
     for (let i = 0; i < count; i++) {
       try {
         const result = await publicClient.readContract({
           address: CONTRACT_ADDRESS as Address,
           abi: CONTRACT_ABI,
-          functionName: 'expenses',
+          functionName: 'getExpense',
           args: [account as Address, BigInt(i)],
-          account: account as Address,
         });
 
-        if (Array.isArray(result) && result.length === 4) {
+        if (Array.isArray(result) && result.length >= 3) {
           expenses.push({
             dataHash: result[0] as string,
-            timestamp: Number(result[1]),
-            amount: Number(result[2]) / 1e18, // Convert from wei
-            category: result[3] as string,
+            dataCID: result[1] as string,
+            timestamp: Number(result[2]),
           });
         }
       } catch (indexError) {
@@ -192,15 +175,12 @@ export async function getExpenses(account: string): Promise<Expense[]> {
 export async function getExpenseCount(account: string): Promise<number> {
   try {
     const publicClient = await getPublicClient();
-
     const result = await publicClient.readContract({
       address: CONTRACT_ADDRESS as Address,
       abi: CONTRACT_ABI,
       functionName: 'getExpenseCount',
       args: [account as Address],
-      account: account as Address,
     });
-
     return Number(result);
   } catch (error) {
     throw new Error(
@@ -210,26 +190,17 @@ export async function getExpenseCount(account: string): Promise<number> {
 }
 
 /**
- * Wait for a transaction to be mined and get the receipt
+ * Wait for a transaction to be mined
  */
 export async function waitForTransaction(txHash: Hash): Promise<boolean> {
   try {
     const publicClient = await getPublicClient();
-
-    // Poll for transaction receipt with timeout
-    const maxAttempts = 60; // 30 seconds with 500ms interval
+    const maxAttempts = 60;
     let attempts = 0;
 
     while (attempts < maxAttempts) {
-      const receipt = await publicClient.getTransactionReceipt({
-        hash: txHash,
-      });
-
-      if (receipt) {
-        return receipt.status === 'success';
-      }
-
-      // Wait before next attempt
+      const receipt = await publicClient.getTransactionReceipt({ hash: txHash });
+      if (receipt) return receipt.status === 'success';
       await new Promise((resolve) => setTimeout(resolve, 500));
       attempts++;
     }
@@ -238,57 +209,6 @@ export async function waitForTransaction(txHash: Hash): Promise<boolean> {
   } catch (error) {
     throw new Error(
       `Failed to wait for transaction: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
-}
-
-/**
- * Get transaction details including status
- */
-export async function getTransactionStatus(txHash: Hash): Promise<'success' | 'failed' | 'pending'> {
-  try {
-    const publicClient = await getPublicClient();
-
-    const receipt = await publicClient.getTransactionReceipt({
-      hash: txHash,
-    });
-
-    if (!receipt) {
-      return 'pending';
-    }
-
-    return receipt.status === 'success' ? 'success' : 'failed';
-  } catch (error) {
-    console.error('Failed to get transaction status:', error);
-    return 'pending';
-  }
-}
-
-/**
- * Estimate gas cost for registering an expense
- */
-export async function estimateRegisterExpenseGas(
-  amount: number,
-  category: string,
-  dataHash: `0x${string}`
-): Promise<bigint> {
-  try {
-    const publicClient = await getPublicClient();
-    const account = await getAccount();
-    const amountInWei = BigInt(Math.floor(amount * 1e18));
-
-    const gasEstimate = await publicClient.estimateContractGas({
-      account: account as Address,
-      address: CONTRACT_ADDRESS as Address,
-      abi: CONTRACT_ABI,
-      functionName: 'registerExpense',
-      args: [dataHash, amountInWei, category],
-    });
-
-    return gasEstimate;
-  } catch (error) {
-    throw new Error(
-      `Failed to estimate gas: ${error instanceof Error ? error.message : String(error)}`
     );
   }
 }

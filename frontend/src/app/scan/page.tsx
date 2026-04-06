@@ -8,15 +8,16 @@ import BlockchainBadge from '@/components/BlockchainBadge';
 import { processReceipt, suggestCategory, type ReceiptData } from '@/lib/ocr';
 import { generateExpenseHash, registerExpense } from '@/lib/blockchain';
 import { saveReceipt } from '@/lib/storage';
-import { getAccount } from '@/lib/wallet';
+import { getAccount, isMiniPay, hasExternalWallet } from '@/lib/wallet';
+import { encryptPayload, getEncryptionKey, type ExpensePayload } from '@/lib/encryption';
+import { uploadToIPFS } from '@/lib/ipfs';
 import type { ReceiptRecord } from '@/lib/storage';
 
 export default function ScanPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // State management
-  const [step, setStep] = useState<0 | 1 | 2>(0); // 0: camera, 1: processing, 2: confirm
+  const [step, setStep] = useState<0 | 1 | 2>(0);
   const [imageData, setImageData] = useState<string>('');
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
   const [selectedCategory, setSelectedCategory] = useState('alimentos');
@@ -26,14 +27,12 @@ export default function ScanPage() {
   const [isRegistering, setIsRegistering] = useState(false);
   const [registrationError, setRegistrationError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [progressText, setProgressText] = useState('');
 
-  // Step 0: Camera / Image Upload
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     try {
-      // Convert file to base64
       const reader = new FileReader();
       reader.onload = async (event) => {
         const base64 = event.target?.result as string;
@@ -46,7 +45,6 @@ export default function ScanPage() {
     }
   };
 
-  // Step 1: Process OCR and suggest category
   useEffect(() => {
     if (step === 1 && imageData) {
       processOCR();
@@ -57,17 +55,11 @@ export default function ScanPage() {
     try {
       const data = await processReceipt(imageData);
       setReceiptData(data);
-
-      // Set initial values for step 2
       setEditedMerchant(data.merchant);
       setEditedDate(data.date);
       setEditedAmount(data.amount.toString());
-
-      // Suggest category
       const suggestedCat = suggestCategory(data.merchant, data.items);
       setSelectedCategory(suggestedCat);
-
-      // Move to confirm step
       setStep(2);
     } catch (err) {
       console.error('OCR error:', err);
@@ -83,13 +75,32 @@ export default function ScanPage() {
     }
   };
 
-  // Step 2: Confirm and Register
+  const signMessage = async (message: string): Promise<string> => {
+    const provider = isMiniPay()
+      ? (window as any).provider
+      : hasExternalWallet()
+        ? (window as any).ethereum
+        : null;
+    if (!provider) throw new Error('No wallet available for signing');
+    const account = await getAccount();
+    const signature = await provider.request({
+      method: 'personal_sign',
+      params: [
+        `0x${Array.from(new TextEncoder().encode(message))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join('')}`,
+        account,
+      ],
+    });
+    return signature;
+  };
+
   const handleConfirmAndRegister = async () => {
     setIsRegistering(true);
     setRegistrationError('');
+    setProgressText('Preparando...');
 
     try {
-      // Validate inputs
       if (!editedMerchant.trim()) {
         setRegistrationError('El comercio es requerido');
         setIsRegistering(false);
@@ -103,22 +114,47 @@ export default function ScanPage() {
         return;
       }
 
-      // Get account for hash generation
+      // Get account
       let account = '';
       try {
         account = await getAccount();
       } catch {
-        // Continue without account - hash will still be generated
         account = '0x0000000000000000000000000000000000000000';
       }
 
-      // Generate hash
+      // Step A: Generate hash (proof of expense)
+      setProgressText('Generando hash...');
       const dataHash = generateExpenseHash(amount, editedDate, editedMerchant, account);
 
-      // Register on blockchain (pass account to avoid re-requesting provider)
-      const txHash = await registerExpense(amount, selectedCategory, dataHash, account);
+      // Step B: Encrypt ALL data (text + image) into one payload
+      let dataCID = '';
+      setProgressText('Encriptando datos...');
+      try {
+        const encKey = await getEncryptionKey(signMessage, account);
 
-      // Save to IndexedDB
+        const payload: ExpensePayload = {
+          merchant: editedMerchant,
+          amount,
+          date: editedDate,
+          category: selectedCategory,
+          imageBase64: imageData,
+        };
+
+        const encryptedData = await encryptPayload(payload, encKey);
+
+        // Step C: Upload encrypted payload to IPFS
+        setProgressText('Subiendo a IPFS...');
+        dataCID = await uploadToIPFS(encryptedData);
+      } catch (err) {
+        console.warn('Encryption/IPFS failed, continuing without:', err);
+        // If encryption fails (no wallet), still register hash on-chain
+      }
+
+      // Step D: Register on blockchain (only hash + CID, no personal data)
+      setProgressText('Registrando en blockchain...');
+      const txHash = await registerExpense(dataHash, dataCID, account);
+
+      // Step E: Save to IndexedDB (local backup)
       const record: ReceiptRecord = {
         imageData,
         merchant: editedMerchant,
@@ -129,19 +165,18 @@ export default function ScanPage() {
         dataHash,
         timestamp: Date.now(),
       };
-
       await saveReceipt(record);
 
-      // Show success message
-      setSuccessMessage(`✓ Gasto registrado exitosamente`);
+      setSuccessMessage('✓ Gasto registrado exitosamente');
+      setProgressText('');
 
-      // Redirect to home after 2 seconds
       setTimeout(() => {
         router.push('/');
       }, 2000);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Error al registrar el gasto';
       setRegistrationError(errorMsg);
+      setProgressText('');
       console.error('Registration error:', err);
     } finally {
       setIsRegistering(false);
@@ -157,9 +192,8 @@ export default function ScanPage() {
     setEditedAmount('');
     setRegistrationError('');
     setSuccessMessage('');
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
+    setProgressText('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   return (
@@ -167,176 +201,103 @@ export default function ScanPage() {
       <Header
         title="Escanear Recibo"
         onBack={() => {
-          if (step === 0) {
-            router.push('/');
-          } else {
-            handleCancel();
-          }
+          if (step === 0) router.push('/');
+          else handleCancel();
         }}
       />
 
-      {/* Step 0: Camera */}
       {step === 0 && (
         <div className="px-5 py-6">
-          {/* Camera Viewfinder Area */}
           <div className="mb-6">
             <div className="relative w-full aspect-square bg-gray-900 rounded-2xl overflow-hidden flex items-center justify-center">
-              {/* Corner guides */}
               <div className="absolute inset-0 border-2 border-[#35D07F] opacity-30"></div>
               <div className="absolute top-4 left-4 w-6 h-6 border-t-2 border-l-2 border-[#35D07F]"></div>
               <div className="absolute top-4 right-4 w-6 h-6 border-t-2 border-r-2 border-[#35D07F]"></div>
               <div className="absolute bottom-4 left-4 w-6 h-6 border-b-2 border-l-2 border-[#35D07F]"></div>
               <div className="absolute bottom-4 right-4 w-6 h-6 border-b-2 border-r-2 border-[#35D07F]"></div>
-
-              {/* Center text */}
               <div className="text-center z-10">
                 <p className="text-white text-lg font-medium mb-2">📸</p>
                 <p className="text-white text-sm">Toma una foto del recibo</p>
               </div>
             </div>
           </div>
-
-          {/* Hidden File Input */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={handleImageSelect}
-            className="hidden"
-          />
-
-          {/* Camera Button */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="w-full bg-[#35D07F] text-white font-bold py-3 rounded-lg text-center transition-opacity active:opacity-80"
-          >
+          <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={handleImageSelect} className="hidden" />
+          <button onClick={() => fileInputRef.current?.click()} className="w-full bg-[#35D07F] text-white font-bold py-3 rounded-lg text-center transition-opacity active:opacity-80">
             Abrir Cámara
           </button>
-
-          {/* Info Text */}
-          <p className="text-center text-xs text-gray-500 mt-4">
-            Asegúrate de que el recibo sea legible y tenga buena iluminación
-          </p>
+          <p className="text-center text-xs text-gray-500 mt-4">Asegúrate de que el recibo sea legible y tenga buena iluminación</p>
         </div>
       )}
 
-      {/* Step 1: Processing */}
       {step === 1 && (
         <div className="px-5 py-12 flex flex-col items-center justify-center">
           <div className="text-4xl animate-spin mb-4">⚙️</div>
           <p className="text-lg font-bold text-[#1E3A2F] mb-2">Procesando recibo...</p>
           <p className="text-sm text-gray-600 mb-6">Extrayendo datos con OCR</p>
-
-          {/* Progress bar */}
           <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
             <div className="h-full bg-[#35D07F] animate-pulse rounded-full" style={{ width: '60%' }} />
           </div>
         </div>
       )}
 
-      {/* Step 2: Confirm & Register */}
       {step === 2 && receiptData && (
         <div className="px-5 py-6">
-          {/* Success Message */}
           {successMessage && (
-            <div className="bg-green-50 rounded-lg p-4 mb-4 text-green-700 text-sm font-medium">
-              {successMessage}
-            </div>
+            <div className="bg-green-50 rounded-lg p-4 mb-4 text-green-700 text-sm font-medium">{successMessage}</div>
           )}
 
-          {/* OCR Confidence Badge */}
           <div className="mb-6">
             {receiptData.confidence >= 70 ? (
-              <div className="inline-block bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-medium">
-                ✓ OCR exitoso
-              </div>
+              <div className="inline-block bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-medium">✓ OCR exitoso</div>
             ) : (
-              <div className="inline-block bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-medium">
-                ⚠ Revisa los datos
-              </div>
+              <div className="inline-block bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-medium">⚠ Revisa los datos</div>
             )}
           </div>
 
-          {/* Editable Fields */}
           <div className="space-y-4 mb-6">
-            {/* Comercio */}
             <div>
               <label className="block text-sm font-medium text-[#1E3A2F] mb-1">Comercio</label>
-              <input
-                type="text"
-                value={editedMerchant}
-                onChange={(e) => setEditedMerchant(e.target.value)}
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#35D07F]"
-                placeholder="Nombre del comercio"
-              />
+              <input type="text" value={editedMerchant} onChange={(e) => setEditedMerchant(e.target.value)} className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#35D07F]" placeholder="Nombre del comercio" />
             </div>
-
-            {/* Fecha */}
             <div>
               <label className="block text-sm font-medium text-[#1E3A2F] mb-1">Fecha</label>
-              <input
-                type="date"
-                value={editedDate}
-                onChange={(e) => setEditedDate(e.target.value)}
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#35D07F]"
-              />
+              <input type="date" value={editedDate} onChange={(e) => setEditedDate(e.target.value)} className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#35D07F]" />
             </div>
-
-            {/* Monto */}
             <div>
               <label className="block text-sm font-medium text-[#1E3A2F] mb-1">Monto</label>
               <div className="relative">
                 <span className="absolute left-4 top-3 text-gray-500 font-medium">$</span>
-                <input
-                  type="number"
-                  value={editedAmount}
-                  onChange={(e) => setEditedAmount(e.target.value)}
-                  step="0.01"
-                  min="0"
-                  className="w-full pl-8 pr-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#35D07F]"
-                  placeholder="0.00"
-                />
+                <input type="number" value={editedAmount} onChange={(e) => setEditedAmount(e.target.value)} step="0.01" min="0" className="w-full pl-8 pr-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#35D07F]" placeholder="0.00" />
               </div>
             </div>
-
-            {/* Category Selector */}
             <div>
               <label className="block text-sm font-medium text-[#1E3A2F] mb-2">Categoría</label>
               <CategorySelector selected={selectedCategory} onSelect={setSelectedCategory} />
             </div>
           </div>
 
-          {/* Blockchain Badge */}
           <div className="mb-6">
             <BlockchainBadge txHash={receiptData.rawText.slice(0, 66) || '0x0000'} />
           </div>
 
-          {/* Error Message */}
+          {/* Privacy notice */}
+          <div className="bg-blue-50 rounded-lg p-3 mb-4">
+            <p className="text-xs text-blue-700">🔒 Tus datos se encriptan antes de guardarse. Solo tú puedes verlos con tu wallet.</p>
+          </div>
+
           {registrationError && (
-            <div className="bg-red-50 rounded-lg p-4 mb-4 text-red-700 text-sm">
-              {registrationError}
-            </div>
+            <div className="bg-red-50 rounded-lg p-4 mb-4 text-red-700 text-sm">{registrationError}</div>
           )}
 
-          {/* Action Buttons */}
           <div className="flex gap-3 mt-6">
-            <button
-              onClick={handleCancel}
-              disabled={isRegistering}
-              className="flex-1 bg-gray-200 text-gray-700 font-bold py-3 rounded-lg transition-opacity active:opacity-80 disabled:opacity-50"
-            >
+            <button onClick={handleCancel} disabled={isRegistering} className="flex-1 bg-gray-200 text-gray-700 font-bold py-3 rounded-lg transition-opacity active:opacity-80 disabled:opacity-50">
               Cancelar
             </button>
-            <button
-              onClick={handleConfirmAndRegister}
-              disabled={isRegistering}
-              className="flex-1 bg-[#35D07F] text-white font-bold py-3 rounded-lg transition-opacity active:opacity-80 disabled:opacity-50 flex items-center justify-center gap-2"
-            >
+            <button onClick={handleConfirmAndRegister} disabled={isRegistering} className="flex-1 bg-[#35D07F] text-white font-bold py-3 rounded-lg transition-opacity active:opacity-80 disabled:opacity-50 flex items-center justify-center gap-2">
               {isRegistering ? (
                 <>
                   <span className="animate-spin">⏳</span>
-                  Registrando...
+                  {progressText || 'Registrando...'}
                 </>
               ) : (
                 'Confirmar y Registrar'

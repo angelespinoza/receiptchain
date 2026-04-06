@@ -6,12 +6,11 @@
 import { defineChain } from 'viem';
 
 // Smart contract address on Celo Sepolia
-export const CONTRACT_ADDRESS = '0x92Ea27f36f601F8Ae5DE664fB41405D053bF0Abf' as const;
+// NOTE: Update this after redeploying the v3 contract
+export const CONTRACT_ADDRESS = '0xb53ee540C23A854c3c6928A3c23d9F87275bFdEa' as const;
 
 /**
  * Celo Sepolia Testnet Configuration
- * Mainnet: chainId 42220
- * Sepolia Testnet: chainId 11142220
  */
 export const CELO_CHAIN = defineChain({
   id: 11142220,
@@ -36,7 +35,7 @@ export const CELO_CHAIN = defineChain({
 });
 
 /**
- * Expense Categories with Spanish names, emojis, and colors
+ * Expense Categories
  */
 export const CATEGORIES = [
   { id: 'alimentos', name: 'Alimentos', icon: '🍔', color: '#FF6B6B' },
@@ -50,7 +49,8 @@ export const CATEGORIES = [
 ] as const;
 
 /**
- * ExpenseRegistry Smart Contract ABI
+ * ExpenseRegistry v3 ABI — Privacy-first
+ * Only stores dataHash + dataCID on-chain
  */
 export const CONTRACT_ABI = [
   {
@@ -58,8 +58,18 @@ export const CONTRACT_ABI = [
     name: 'registerExpense',
     inputs: [
       { name: '_dataHash', type: 'bytes32' },
-      { name: '_amount', type: 'uint256' },
-      { name: '_category', type: 'string' },
+      { name: '_dataCID', type: 'string' },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'registerExpenseFor',
+    inputs: [
+      { name: '_user', type: 'address' },
+      { name: '_dataHash', type: 'bytes32' },
+      { name: '_dataCID', type: 'string' },
     ],
     outputs: [],
     stateMutability: 'nonpayable',
@@ -73,30 +83,17 @@ export const CONTRACT_ABI = [
   },
   {
     type: 'function',
-    name: 'expenses',
+    name: 'getExpense',
     inputs: [
-      { name: 'user', type: 'address' },
-      { name: 'index', type: 'uint256' },
+      { name: '_user', type: 'address' },
+      { name: '_index', type: 'uint256' },
     ],
     outputs: [
       { name: 'dataHash', type: 'bytes32' },
+      { name: 'dataCID', type: 'string' },
       { name: 'timestamp', type: 'uint256' },
-      { name: 'amount', type: 'uint256' },
-      { name: 'category', type: 'string' },
     ],
     stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    name: 'registerExpenseFor',
-    inputs: [
-      { name: '_user', type: 'address' },
-      { name: '_dataHash', type: 'bytes32' },
-      { name: '_amount', type: 'uint256' },
-      { name: '_category', type: 'string' },
-    ],
-    outputs: [],
-    stateMutability: 'nonpayable',
   },
   {
     type: 'event',
@@ -104,18 +101,20 @@ export const CONTRACT_ABI = [
     inputs: [
       { name: 'user', type: 'address', indexed: true },
       { name: 'dataHash', type: 'bytes32', indexed: false },
-      { name: 'amount', type: 'uint256', indexed: false },
-      { name: 'category', type: 'string', indexed: false },
+      { name: 'dataCID', type: 'string', indexed: false },
+      { name: 'timestamp', type: 'uint256', indexed: false },
     ],
   },
 ] as const;
 
 /**
- * cUSD token address on Alfajores testnet
+ * cUSD token address on Celo Sepolia
  */
 export const cUSD_ADDRESS = '0x874069Fa1Eb16D44d622F2e0Ca25eeA172369bC1' as const;
 
 /**
- * Default network configuration
+ * Pinata IPFS Gateway
  */
+export const IPFS_GATEWAY = 'https://gateway.pinata.cloud/ipfs' as const;
+
 export const DEFAULT_CHAIN = CELO_CHAIN;

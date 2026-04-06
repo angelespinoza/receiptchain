@@ -1,9 +1,8 @@
 /**
- * ReceiptChain Relayer API
+ * ReceiptChain Relayer API (v3 — Privacy-first)
  *
- * This endpoint receives expense data from users and submits the
- * transaction to the blockchain using the relayer wallet.
- * The relayer pays the gas fees, so users don't need cUSD.
+ * Receives only: userAddress, dataHash, dataCID
+ * No personal data passes through the relay — it's all encrypted in IPFS.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -17,69 +16,37 @@ import {
 import { privateKeyToAccount } from 'viem/accounts';
 import { CONTRACT_ADDRESS, CONTRACT_ABI, CELO_CHAIN } from '@/lib/constants';
 
-// Extended ABI with the relayer function
-const RELAYER_ABI = [
-  ...CONTRACT_ABI,
-  {
-    type: 'function',
-    name: 'registerExpenseFor',
-    inputs: [
-      { name: '_user', type: 'address' },
-      { name: '_dataHash', type: 'bytes32' },
-      { name: '_amount', type: 'uint256' },
-      { name: '_category', type: 'string' },
-    ],
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-] as const;
-
 interface RelayRequest {
   userAddress: string;
   dataHash: string;
-  amount: number;
-  category: string;
+  dataCID: string;
 }
 
 export async function POST(request: NextRequest) {
   try {
-    // ─── Validate environment ───
     const relayerPrivateKey = process.env.RELAYER_PRIVATE_KEY;
     if (!relayerPrivateKey) {
-      return NextResponse.json(
-        { error: 'Relayer not configured' },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: 'Relayer not configured' }, { status: 500 });
     }
 
-    // ─── Parse request body ───
     const body: RelayRequest = await request.json();
-    const { userAddress, dataHash, amount, category } = body;
+    const { userAddress, dataHash, dataCID } = body;
 
-    if (!userAddress || !dataHash || amount === undefined || !category) {
+    if (!userAddress || !dataHash || !dataCID) {
       return NextResponse.json(
-        { error: 'Missing required fields: userAddress, dataHash, amount, category' },
+        { error: 'Missing required fields: userAddress, dataHash, dataCID' },
         { status: 400 }
       );
     }
 
-    // Validate address format
     if (!/^0x[a-fA-F0-9]{40}$/.test(userAddress)) {
-      return NextResponse.json(
-        { error: 'Invalid user address format' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Invalid user address' }, { status: 400 });
     }
 
-    // Validate dataHash format
     if (!/^0x[a-fA-F0-9]{64}$/.test(dataHash)) {
-      return NextResponse.json(
-        { error: 'Invalid data hash format' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Invalid data hash' }, { status: 400 });
     }
 
-    // ─── Setup relayer wallet ───
     const formattedKey = relayerPrivateKey.startsWith('0x')
       ? relayerPrivateKey
       : `0x${relayerPrivateKey}`;
@@ -96,32 +63,25 @@ export async function POST(request: NextRequest) {
       transport: http('https://forno.celo-sepolia.celo-testnet.org'),
     });
 
-    // ─── Convert amount to wei ───
-    const amountInWei = BigInt(Math.floor(amount * 1e18));
-
-    // ─── Send transaction via relayer ───
     const txHash: Hash = await walletClient.writeContract({
       address: CONTRACT_ADDRESS as Address,
-      abi: RELAYER_ABI,
+      abi: CONTRACT_ABI,
       functionName: 'registerExpenseFor',
       args: [
         userAddress as Address,
         dataHash as `0x${string}`,
-        amountInWei,
-        category,
+        dataCID,
       ],
     });
 
-    // ─── Wait for confirmation ───
     const receipt = await publicClient.waitForTransactionReceipt({
       hash: txHash,
       timeout: 30_000,
     });
 
-    // ─── Return result ───
     return NextResponse.json({
       success: true,
-      txHash: txHash,
+      txHash,
       blockNumber: Number(receipt.blockNumber),
       status: receipt.status,
       gasUsed: receipt.gasUsed.toString(),
@@ -130,20 +90,18 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Relay error:', error);
-
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
-    // Check for common errors
     if (errorMessage.includes('insufficient funds')) {
       return NextResponse.json(
-        { error: 'Relayer wallet has insufficient funds. Please contact support.' },
+        { error: 'Relayer sin fondos. Contacta al administrador.' },
         { status: 503 }
       );
     }
 
     if (errorMessage.includes('Not an authorized relayer')) {
       return NextResponse.json(
-        { error: 'Relayer wallet is not authorized in the smart contract.' },
+        { error: 'Relayer no autorizado en el smart contract.' },
         { status: 403 }
       );
     }
