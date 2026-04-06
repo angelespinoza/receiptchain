@@ -1,6 +1,7 @@
 /**
  * ReceiptChain OCR Processing
- * Receipt image processing with Tesseract.js
+ * Primary: Google Cloud Vision API (server-side, accurate)
+ * Fallback: Tesseract.js (client-side, free)
  * Supports multiple currencies: PEN (S/), USD ($), JPY (¥), EUR (€), etc.
  */
 
@@ -17,15 +18,61 @@ export interface ReceiptData {
 }
 
 /**
- * Process a receipt image using Tesseract.js
+ * Process a receipt image — tries Cloud Vision first, falls back to Tesseract
  */
 export async function processReceipt(imageData: string): Promise<ReceiptData> {
+  try {
+    // Try Google Cloud Vision API first
+    const cloudResult = await processWithCloudVision(imageData);
+    if (cloudResult) return cloudResult;
+  } catch (err) {
+    console.warn('Cloud Vision failed, falling back to Tesseract:', err);
+  }
+
+  // Fallback: Tesseract.js (client-side)
+  return processWithTesseract(imageData);
+}
+
+/**
+ * Process with Google Cloud Vision API (server-side)
+ */
+async function processWithCloudVision(imageData: string): Promise<ReceiptData | null> {
+  const response = await fetch('/api/ocr', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imageBase64: imageData }),
+  });
+
+  if (!response.ok) return null;
+
+  const data = await response.json();
+  if (!data.success || !data.text) return null;
+
+  const rawText = data.text.trim();
+  const merchant = extractMerchant(rawText);
+  const date = extractDate(rawText);
+  const { amount, currency } = extractAmountAndCurrency(rawText);
+  const items = extractItems(rawText);
+
+  return {
+    merchant,
+    date,
+    amount,
+    currency,
+    items,
+    rawText,
+    confidence: data.confidence || 85,
+  };
+}
+
+/**
+ * Process with Tesseract.js (client-side fallback)
+ */
+async function processWithTesseract(imageData: string): Promise<ReceiptData> {
   let worker: Worker | null = null;
 
   try {
-    // Create Tesseract worker with Spanish + English
     worker = await createWorker('spa+eng');
-
     const imageUrl = imageData.startsWith('data:') ? imageData : `data:image/png;base64,${imageData}`;
 
     const {
@@ -48,7 +95,7 @@ export async function processReceipt(imageData: string): Promise<ReceiptData> {
       confidence: Math.round(confidence),
     };
   } catch (error) {
-    console.error('OCR processing error:', error);
+    console.error('Tesseract OCR error:', error);
     return {
       merchant: '',
       date: new Date().toISOString().split('T')[0],
@@ -79,10 +126,11 @@ function extractMerchant(text: string): string {
     /^[\s\*\-=_]+$/, // Only decorative chars
     /^\w{1,2}$/, // Very short (noise)
     /^(fecha|date|hora|time|cajero|caja|vendedor|mesero)/i,
+    /^https?:\/\//i, // URLs
+    /^(central|telefon|website|www|correo|email)/i,
   ];
 
   for (const line of lines.slice(0, 8)) {
-    // Check if this line looks like a merchant name
     const isSkip = skipPatterns.some((p) => p.test(line));
     if (isSkip) continue;
 
@@ -93,6 +141,9 @@ function extractMerchant(text: string): string {
     let merchant = line
       .replace(/^\d+[\s\.\-]*/, '') // Remove leading numbers
       .replace(/[*=\-_]{2,}/g, '') // Remove decorative chars
+      .replace(/\s+S\.?A\.?C\.?\s*$/i, ' S.A.C.') // Normalize S.A.C.
+      .replace(/\s+S\.?A\.?\s*$/i, ' S.A.') // Normalize S.A.
+      .replace(/\s+E\.?I\.?R\.?L\.?\s*$/i, ' E.I.R.L.') // Normalize E.I.R.L.
       .trim();
 
     if (merchant.length >= 3 && merchant.length <= 60) {
@@ -115,17 +166,34 @@ function extractMerchant(text: string): string {
  * Supports: DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY, YYYY-MM-DD, and more
  */
 function extractDate(text: string): string {
+  // Look for "Fecha Emision" or "Fecha" labeled dates first (common in Peruvian receipts)
+  const labeledDate = text.match(
+    /fecha\s*(?:de\s*)?(?:emisi[oó]n|venta)?[:\s]*(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/i
+  );
+  if (labeledDate) {
+    const [, year, month, day] = labeledDate;
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  }
+
+  const labeledDate2 = text.match(
+    /fecha\s*(?:de\s*)?(?:emisi[oó]n|venta)?[:\s]*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/i
+  );
+  if (labeledDate2) {
+    const [, day, month, year] = labeledDate2;
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  }
+
+  // YYYY-MM-DD or YYYY/MM/DD (ISO format, common in systems)
+  const ymd = text.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+  if (ymd) {
+    const [, year, month, day] = ymd;
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  }
+
   // DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
   const dmy = text.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
   if (dmy) {
     const [, day, month, year] = dmy;
-    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-  }
-
-  // YYYY-MM-DD or YYYY/MM/DD
-  const ymd = text.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
-  if (ymd) {
-    const [, year, month, day] = ymd;
     return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
   }
 
@@ -199,6 +267,24 @@ function extractAmountAndCurrency(text: string): { amount: number; currency: str
     }
   }
 
+  // Try "IMPORTE", "MONTO", "PRECIO", "COSTO" (common in Latin American receipts)
+  const altTotalPatterns = [
+    /(?:importe|monto|precio|costo)\s*(?:total)?[:\s]*(?:S\/\.?)\s*([\d.,\s]+)/i,
+    /(?:importe|monto|precio|costo)\s*(?:total)?[:\s]*(?:\$)\s*([\d.,\s]+)/i,
+    /(?:importe|monto|precio|costo)\s*(?:total)?[:\s]*([\d.,\s]+)/i,
+  ];
+  const altCurrencyMap = ['S/', '$', '$'];
+
+  for (let i = 0; i < altTotalPatterns.length; i++) {
+    const match = text.match(altTotalPatterns[i]);
+    if (match && match[1]) {
+      const amount = parseAmountStr(match[1]);
+      if (amount > 0) {
+        return { amount, currency: altCurrencyMap[i] };
+      }
+    }
+  }
+
   // Try to detect currency from anywhere in the text, then find amounts
   for (const cp of CURRENCY_PATTERNS) {
     const regex = new RegExp(cp.regex.source, cp.regex.flags);
@@ -212,7 +298,7 @@ function extractAmountAndCurrency(text: string): { amount: number; currency: str
 
     if (matches.length > 0) {
       // Return the largest amount (likely the total)
-      const largest = matches.reduce((max, m) => m.amount > max.amount ? m : max);
+      const largest = matches.reduce((max, m) => (m.amount > max.amount ? m : max));
       return { amount: largest.amount, currency: cp.symbol };
     }
   }
@@ -246,7 +332,6 @@ function parseAmountStr(str: string): number {
   } else {
     // Only one separator
     if (lastComma !== -1) {
-      // Check if comma is decimal (e.g., "123,45") or thousands (e.g., "1,234")
       const afterComma = amountStr.substring(lastComma + 1);
       if (afterComma.length <= 2) {
         amountStr = amountStr.replace(',', '.');
@@ -272,7 +357,12 @@ function extractItems(text: string): string[] {
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.length < 3) continue;
-    if (/^(total|subtotal|cantidad|item|producto|descripcion|iva|igv|impuesto|descuento|vuelto|cambio|efectivo|tarjeta|gravad)/i.test(trimmed)) continue;
+    if (
+      /^(total|subtotal|cantidad|item|producto|descripcion|iva|igv|impuesto|descuento|vuelto|cambio|efectivo|tarjeta|gravad)/i.test(
+        trimmed
+      )
+    )
+      continue;
     if (/^[\s\d\-=\*_]+$/.test(trimmed)) continue;
 
     const match = trimmed.match(itemPattern);
@@ -293,25 +383,53 @@ function extractItems(text: string): string[] {
 export function suggestCategory(merchant: string, items: string[]): string {
   const text = `${merchant} ${items.join(' ')}`.toLowerCase();
 
-  if (/farmaci|medical|doctor|hospital|salud|medicina|receta|botica|clínica|laboratorio|óptica/i.test(text)) {
+  if (
+    /farmaci|medical|doctor|hospital|salud|medicina|receta|botica|clínica|laboratorio|óptica/i.test(
+      text
+    )
+  ) {
     return 'salud';
   }
-  if (/uber|taxi|gas|gasolina|transport|bus|metro|colectivo|viaje|vuelo|tren|avion|peaje|estacion|grifo|petrol/i.test(text)) {
+  if (
+    /uber|taxi|gas|gasolina|transport|bus|metro|colectivo|viaje|vuelo|tren|avion|peaje|estacion|grifo|petrol|shalom|cruz del sur|oltursa|tepsa|movil tours|civa|flores/i.test(
+      text
+    )
+  ) {
     return 'transporte';
   }
-  if (/netflix|cine|cinema|movie|spotify|game|juego|disney|hbo|película|streaming|bar|club|pub|discoteca|karaoke/i.test(text)) {
+  if (
+    /netflix|cine|cinema|movie|spotify|game|juego|disney|hbo|película|streaming|bar|club|pub|discoteca|karaoke/i.test(
+      text
+    )
+  ) {
     return 'entretenimiento';
   }
-  if (/escuela|colegio|universidad|educación|libro|curso|clase|maestro|profesor|school|academy|librería/i.test(text)) {
+  if (
+    /escuela|colegio|universidad|educación|libro|curso|clase|maestro|profesor|school|academy|librería/i.test(
+      text
+    )
+  ) {
     return 'educacion';
   }
-  if (/ropa|clothing|tienda|shop|zapatos|shoes|bolsa|pantalon|camisa|dress|fashion|vestuario|zapatería|boutique/i.test(text)) {
+  if (
+    /ropa|clothing|tienda|shop|zapatos|shoes|bolsa|pantalon|camisa|dress|fashion|vestuario|zapatería|boutique/i.test(
+      text
+    )
+  ) {
     return 'ropa';
   }
-  if (/hogar|casa|home|furniture|mueble|decoración|cocina|baño|limpieza|construcción|ferretería|hardware|sodimac|promart/i.test(text)) {
+  if (
+    /hogar|casa|home|furniture|mueble|decoración|cocina|baño|limpieza|construcción|ferretería|hardware|sodimac|promart/i.test(
+      text
+    )
+  ) {
     return 'hogar';
   }
-  if (/alimento|comida|restaurante|food|café|coffee|pizza|burger|restaurant|supermercado|market|carnicería|bakery|panadería|grocery|pollo|ceviche|chifa|pollería|bodega|minimarket|wong|metro|tottus|plaza vea/i.test(text)) {
+  if (
+    /alimento|comida|restaurante|food|café|coffee|pizza|burger|restaurant|supermercado|market|carnicería|bakery|panadería|grocery|pollo|ceviche|chifa|pollería|bodega|minimarket|wong|metro|tottus|plaza vea/i.test(
+      text
+    )
+  ) {
     return 'alimentos';
   }
 
