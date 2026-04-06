@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import BottomNav from '@/components/BottomNav';
 import ExpenseCard from '@/components/ExpenseCard';
-import { getAccount } from '@/lib/wallet';
+import ConnectWallet from '@/components/ConnectWallet';
+import { getAccount, isMiniPay } from '@/lib/wallet';
 import { getReceipts, getMonthlyExpenseSummary } from '@/lib/storage';
 import { CATEGORIES } from '@/lib/constants';
 import type { ReceiptRecord } from '@/lib/storage';
@@ -74,7 +75,10 @@ export default function Dashboard() {
     <div className="min-h-screen">
       {/* Header Section */}
       <div className="bg-[#1E3A2F] text-white rounded-b-3xl px-5 py-6 pb-8">
-        <p className="text-sm mb-2">Hola, Angel 👋</p>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-sm">Hola, Angel 👋</p>
+          <ConnectWallet onConnected={(addr) => setAccount(addr)} />
+        </div>
         <h1 className="text-3xl font-bold mb-6">ReceiptChain</h1>
 
         {/* Monthly Total Card */}

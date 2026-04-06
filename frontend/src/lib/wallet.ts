@@ -1,6 +1,6 @@
 /**
  * ReceiptChain Wallet Integration
- * MiniPay wallet connection using viem
+ * Supports MiniPay (auto-connect) and MetaMask/other EVM wallets (manual connect)
  */
 
 import {
@@ -15,16 +15,17 @@ import {
 import { CELO_CHAIN } from './constants';
 
 /**
- * Global type declaration for MiniPay provider
+ * Global type declaration for wallet providers
  */
 declare global {
   interface Window {
-    provider: any;
+    provider: any;       // MiniPay provider
+    ethereum: any;       // MetaMask / other EVM wallets
   }
 }
 
 /**
- * Check if MiniPay wallet is available
+ * Check if running inside MiniPay
  */
 export function isMiniPay(): boolean {
   if (typeof window === 'undefined') return false;
@@ -32,20 +33,45 @@ export function isMiniPay(): boolean {
 }
 
 /**
+ * Check if MetaMask or another EVM wallet is available
+ */
+export function hasExternalWallet(): boolean {
+  if (typeof window === 'undefined') return false;
+  return typeof window.ethereum !== 'undefined';
+}
+
+/**
+ * Check if any wallet is available
+ */
+export function hasAnyWallet(): boolean {
+  return isMiniPay() || hasExternalWallet();
+}
+
+/**
+ * Get the active provider (MiniPay first, then MetaMask)
+ */
+function getProvider(): any {
+  if (isMiniPay()) return window.provider;
+  if (hasExternalWallet()) return window.ethereum;
+  return null;
+}
+
+/**
  * Get wallet client for signing transactions
- * Uses MiniPay provider if available, otherwise throws error
+ * Uses MiniPay provider if available, otherwise MetaMask/EVM wallet
  */
 export async function getWalletClient(): Promise<
   WalletClient<Transport, typeof CELO_CHAIN>
 > {
-  if (!isMiniPay()) {
-    throw new Error('MiniPay provider not available. Please use MiniPay wallet.');
+  const provider = getProvider();
+  if (!provider) {
+    throw new Error('No wallet available. Please use MiniPay or install MetaMask.');
   }
 
   try {
     const client = createWalletClient({
       chain: CELO_CHAIN,
-      transport: custom(window.provider),
+      transport: custom(provider),
     });
     return client;
   } catch (error) {
@@ -74,15 +100,16 @@ export async function getPublicClient(): Promise<PublicClient<Transport, typeof 
 
 /**
  * Get the currently connected wallet account address
- * Requests permission from user if not already connected
+ * Works with MiniPay, MetaMask, and other EVM wallets
  */
 export async function getAccount(): Promise<string> {
-  if (!isMiniPay()) {
-    throw new Error('MiniPay provider not available');
+  const provider = getProvider();
+  if (!provider) {
+    throw new Error('No wallet available');
   }
 
   try {
-    const accounts = await window.provider.request({
+    const accounts = await provider.request({
       method: 'eth_requestAccounts',
     });
 
@@ -100,15 +127,14 @@ export async function getAccount(): Promise<string> {
 
 /**
  * Get account without requesting permission
- * Returns null if wallet is not connected
+ * Returns null if no wallet is connected
  */
 export async function getConnectedAccount(): Promise<string | null> {
-  if (!isMiniPay()) {
-    return null;
-  }
+  const provider = getProvider();
+  if (!provider) return null;
 
   try {
-    const accounts = await window.provider.request({
+    const accounts = await provider.request({
       method: 'eth_accounts',
     });
 
@@ -126,12 +152,11 @@ export async function getConnectedAccount(): Promise<string | null> {
  * Check if wallet is connected to the correct chain
  */
 export async function isConnectedToCorrectChain(): Promise<boolean> {
-  if (!isMiniPay()) {
-    return false;
-  }
+  const provider = getProvider();
+  if (!provider) return false;
 
   try {
-    const chainId = await window.provider.request({
+    const chainId = await provider.request({
       method: 'eth_chainId',
     });
 
@@ -142,22 +167,23 @@ export async function isConnectedToCorrectChain(): Promise<boolean> {
 }
 
 /**
- * Switch to Celo Alfajores chain
+ * Switch to Celo Sepolia chain
  */
 export async function switchToCeloChain(): Promise<void> {
-  if (!isMiniPay()) {
-    throw new Error('MiniPay provider not available');
+  const provider = getProvider();
+  if (!provider) {
+    throw new Error('No wallet available');
   }
 
   try {
-    await window.provider.request({
+    await provider.request({
       method: 'wallet_switchEthereumChain',
       params: [{ chainId: `0x${CELO_CHAIN.id.toString(16)}` }],
     });
   } catch (error: any) {
     if (error.code === 4902) {
       // Chain not added to wallet, try adding it
-      await window.provider.request({
+      await provider.request({
         method: 'wallet_addEthereumChain',
         params: [
           {
