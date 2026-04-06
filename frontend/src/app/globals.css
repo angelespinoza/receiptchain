@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+:root {
+  --celo-green: #35D07F;
+  --celo-dark: #1E3A2F;
+  --celo-gold: #FBCC5C;
+  --background: #F7FBF9;
+  --foreground: #1A1A2E;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-celo-green: #35D07F;
+  --color-celo-dark: #1E3A2F;
+  --color-celo-gold: #FBCC5C;
+  --color-celo-light: #E8FFF3;
+  --color-gray-soft: #94A3B8;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+/* Mobile-first: full height */
+html, body, #__next {
+  height: 100%;
+  min-height: 100dvh;
+}
+
+/* Camera viewfinder */
+.camera-viewfinder {
+  position: relative;
+  background: #111;
+  border-radius: 1rem;
+  overflow: hidden;
+}
+
+.camera-viewfinder video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Scan guides */
+.scan-corner {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  border-color: var(--celo-green);
+}
+.scan-corner.tl { top: 16px; left: 16px; border-top: 3px solid; border-left: 3px solid; }
+.scan-corner.tr { top: 16px; right: 16px; border-top: 3px solid; border-right: 3px solid; }
+.scan-corner.bl { bottom: 16px; left: 16px; border-bottom: 3px solid; border-left: 3px solid; }
+.scan-corner.br { bottom: 16px; right: 16px; border-bottom: 3px solid; border-right: 3px solid; }
+
+/* Progress bar animation */
+@keyframes progress-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.animate-pulse-slow {
+  animation: progress-pulse 2s ease-in-out infinite;
+}
+
+/* Category chip active state */
+.category-chip-active {
+  border-color: var(--celo-green) !important;
+  background: var(--color-celo-light) !important;
+}
