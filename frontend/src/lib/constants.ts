@@ -5,16 +5,15 @@
 
 import { defineChain } from 'viem';
 
-// Smart contract address on Celo Sepolia
-// NOTE: Update this after redeploying the v3 contract
-export const CONTRACT_ADDRESS = '0xb53ee540C23A854c3c6928A3c23d9F87275bFdEa' as const;
+// Smart contract address on Celo Mainnet
+export const CONTRACT_ADDRESS = '0x6dAA09699e508d42384adDB91450E1FbD85B31E5' as const;
 
 /**
- * Celo Sepolia Testnet Configuration
+ * Celo Mainnet Configuration
  */
 export const CELO_CHAIN = defineChain({
-  id: 11142220,
-  name: 'Celo Sepolia Testnet',
+  id: 42220,
+  name: 'Celo',
   nativeCurrency: {
     decimals: 18,
     name: 'CELO',
@@ -22,16 +21,16 @@ export const CELO_CHAIN = defineChain({
   },
   rpcUrls: {
     default: {
-      http: ['https://forno.celo-sepolia.celo-testnet.org'],
+      http: ['https://forno.celo.org'],
     },
     public: {
-      http: ['https://forno.celo-sepolia.celo-testnet.org'],
+      http: ['https://forno.celo.org'],
     },
   },
   blockExplorers: {
-    default: { name: 'Celoscan', url: 'https://celo-sepolia.celoscan.io' },
+    default: { name: 'Celoscan', url: 'https://celoscan.io' },
   },
-  testnet: true,
+  testnet: false,
 });
 
 /**
@@ -108,9 +107,9 @@ export const CONTRACT_ABI = [
 ] as const;
 
 /**
- * cUSD token address on Celo Sepolia
+ * cUSD token address on Celo Mainnet
  */
-export const cUSD_ADDRESS = '0x874069Fa1Eb16D44d622F2e0Ca25eeA172369bC1' as const;
+export const cUSD_ADDRESS = '0x765DE816845861e75A25fCA122bb6898B8B1282a' as const;
 
 /**
  * Pinata IPFS Gateway
