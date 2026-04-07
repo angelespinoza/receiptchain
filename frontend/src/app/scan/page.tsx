@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAccount } from 'wagmi';
+import { useAppKit } from '@reown/appkit/react';
 import Header from '@/components/Header';
 import CategorySelector from '@/components/CategorySelector';
 import BlockchainBadge from '@/components/BlockchainBadge';
@@ -24,6 +25,7 @@ import type { ReceiptRecord } from '@/lib/storage';
 export default function ScanPage() {
   const router = useRouter();
   const { address } = useAccount();
+  const { open } = useAppKit();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
 
@@ -110,7 +112,13 @@ export default function ScanPage() {
         return;
       }
 
-      const account = address || '0x0000000000000000000000000000000000000000';
+      if (!address) {
+        setRegistrationError('Debes conectar tu cuenta para registrar gastos');
+        setIsRegistering(false);
+        return;
+      }
+
+      const account = address;
 
       // Step A: Generate hash (proof of expense)
       setProgressText('Generando hash...');
@@ -237,33 +245,51 @@ export default function ScanPage() {
 
       {step === 0 && (
         <div className="px-5 py-6">
-          <div className="mb-6">
-            <div className="relative w-full aspect-square bg-gray-900 rounded-2xl overflow-hidden flex items-center justify-center">
-              <div className="absolute inset-0 border-2 border-[#35D07F] opacity-30"></div>
-              <div className="absolute top-4 left-4 w-6 h-6 border-t-2 border-l-2 border-[#35D07F]"></div>
-              <div className="absolute top-4 right-4 w-6 h-6 border-t-2 border-r-2 border-[#35D07F]"></div>
-              <div className="absolute bottom-4 left-4 w-6 h-6 border-b-2 border-l-2 border-[#35D07F]"></div>
-              <div className="absolute bottom-4 right-4 w-6 h-6 border-b-2 border-r-2 border-[#35D07F]"></div>
-              <div className="text-center z-10">
-                <p className="text-white text-lg font-medium mb-2">📸</p>
-                <p className="text-white text-sm">Toma una foto del recibo</p>
-              </div>
+          {!address ? (
+            /* Not connected — show connect prompt */
+            <div className="text-center py-12">
+              <div className="text-5xl mb-4">🔒</div>
+              <h2 className="text-lg font-bold text-[#1E3A2F] mb-2">Conecta tu cuenta</h2>
+              <p className="text-sm text-gray-500 mb-6">Necesitas iniciar sesión para registrar gastos y proteger tus datos.</p>
+              <button
+                onClick={() => open()}
+                className="bg-[#35D07F] text-white font-bold px-8 py-3 rounded-xl transition-opacity active:opacity-80"
+              >
+                Iniciar sesión
+              </button>
             </div>
-          </div>
-          {/* Hidden inputs */}
-          <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={handleImageSelect} className="hidden" />
-          <input ref={galleryInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
+          ) : (
+            /* Connected — show camera/gallery */
+            <>
+              <div className="mb-6">
+                <div className="relative w-full aspect-square bg-gray-900 rounded-2xl overflow-hidden flex items-center justify-center">
+                  <div className="absolute inset-0 border-2 border-[#35D07F] opacity-30"></div>
+                  <div className="absolute top-4 left-4 w-6 h-6 border-t-2 border-l-2 border-[#35D07F]"></div>
+                  <div className="absolute top-4 right-4 w-6 h-6 border-t-2 border-r-2 border-[#35D07F]"></div>
+                  <div className="absolute bottom-4 left-4 w-6 h-6 border-b-2 border-l-2 border-[#35D07F]"></div>
+                  <div className="absolute bottom-4 right-4 w-6 h-6 border-b-2 border-r-2 border-[#35D07F]"></div>
+                  <div className="text-center z-10">
+                    <p className="text-white text-lg font-medium mb-2">📸</p>
+                    <p className="text-white text-sm">Toma una foto del recibo</p>
+                  </div>
+                </div>
+              </div>
+              {/* Hidden inputs */}
+              <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={handleImageSelect} className="hidden" />
+              <input ref={galleryInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
 
-          {/* Action buttons */}
-          <div className="flex gap-3">
-            <button onClick={() => fileInputRef.current?.click()} className="flex-1 bg-[#35D07F] text-white font-bold py-3 rounded-lg text-center transition-opacity active:opacity-80">
-              📸 Tomar Foto
-            </button>
-            <button onClick={() => galleryInputRef.current?.click()} className="flex-1 bg-[#1E3A2F] text-white font-bold py-3 rounded-lg text-center transition-opacity active:opacity-80">
-              🖼️ Galería
-            </button>
-          </div>
-          <p className="text-center text-xs text-gray-500 mt-4">Asegúrate de que el recibo sea legible y tenga buena iluminación</p>
+              {/* Action buttons */}
+              <div className="flex gap-3">
+                <button onClick={() => fileInputRef.current?.click()} className="flex-1 bg-[#35D07F] text-white font-bold py-3 rounded-lg text-center transition-opacity active:opacity-80">
+                  📸 Tomar Foto
+                </button>
+                <button onClick={() => galleryInputRef.current?.click()} className="flex-1 bg-[#1E3A2F] text-white font-bold py-3 rounded-lg text-center transition-opacity active:opacity-80">
+                  🖼️ Galería
+                </button>
+              </div>
+              <p className="text-center text-xs text-gray-500 mt-4">Asegúrate de que el recibo sea legible y tenga buena iluminación</p>
+            </>
+          )}
         </div>
       )}
 
