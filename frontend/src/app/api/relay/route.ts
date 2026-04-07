@@ -55,12 +55,12 @@ export async function POST(request: NextRequest) {
     const walletClient = createWalletClient({
       account,
       chain: CELO_CHAIN,
-      transport: http('https://forno.celo-sepolia.celo-testnet.org'),
+      transport: http(CELO_CHAIN.rpcUrls.default.http[0]),
     });
 
     const publicClient = createPublicClient({
       chain: CELO_CHAIN,
-      transport: http('https://forno.celo-sepolia.celo-testnet.org'),
+      transport: http(CELO_CHAIN.rpcUrls.default.http[0]),
     });
 
     const txHash: Hash = await walletClient.writeContract({
