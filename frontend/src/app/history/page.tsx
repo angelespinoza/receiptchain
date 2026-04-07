@@ -2,12 +2,20 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useAccount } from 'wagmi';
 import Header from '@/components/Header';
 import ExpenseCard from '@/components/ExpenseCard';
 import BottomNav from '@/components/BottomNav';
+import PinModal from '@/components/PinModal';
 import { getReceipts } from '@/lib/storage';
-import { getAccount, isMiniPay, hasExternalWallet } from '@/lib/wallet';
-import { getEncryptionKey, decryptPayload, type ExpensePayload } from '@/lib/encryption';
+import {
+  getEncryptionKey,
+  decryptPayload,
+  hasEncryptionKey,
+  recoverKeyFromBackup,
+  getBackupCID,
+  type ExpensePayload,
+} from '@/lib/encryption';
 import { downloadFromIPFS } from '@/lib/ipfs';
 import { getOnChainExpenses, type OnChainExpense } from '@/lib/blockchain';
 import { CELO_CHAIN } from '@/lib/constants';
@@ -31,6 +39,7 @@ interface UnifiedExpense {
 }
 
 export default function HistoryPage() {
+  const { address } = useAccount();
   const [expenses, setExpenses] = useState<UnifiedExpense[]>([]);
   const [filteredExpenses, setFilteredExpenses] = useState<UnifiedExpense[]>([]);
   const [activeFilter, setActiveFilter] = useState<FilterType>('todos');
@@ -38,6 +47,9 @@ export default function HistoryPage() {
   const [selectedExpense, setSelectedExpense] = useState<UnifiedExpense | null>(null);
   const [decryptedImage, setDecryptedImage] = useState<string | null>(null);
   const [loadingImage, setLoadingImage] = useState(false);
+  const [showPinRecovery, setShowPinRecovery] = useState(false);
+  const [pinError, setPinError] = useState('');
+  const [pendingDecryptExpense, setPendingDecryptExpense] = useState<UnifiedExpense | null>(null);
 
   useEffect(() => { loadExpenses(); }, []);
 
@@ -53,29 +65,29 @@ export default function HistoryPage() {
       }));
 
       // Try loading from blockchain
-      try {
-        const account = await getAccount();
-        const onChainExpenses = await getOnChainExpenses(account);
+      if (address) {
+        try {
+          const onChainExpenses = await getOnChainExpenses(address);
 
-        // For blockchain expenses not in local, try to decrypt them
-        for (const bExp of onChainExpenses) {
-          const alreadyLocal = unified.some((u) => u.dataHash === bExp.dataHash);
-          if (!alreadyLocal && bExp.dataCID) {
-            unified.push({
-              merchant: '🔒 Encriptado',
-              amount: 0,
-              date: new Date(bExp.timestamp * 1000).toISOString().split('T')[0],
-              category: 'otros',
-              txHash: '',
-              dataHash: bExp.dataHash,
-              dataCID: bExp.dataCID,
-              timestamp: bExp.timestamp * 1000,
-              source: 'blockchain',
-            });
+          for (const bExp of onChainExpenses) {
+            const alreadyLocal = unified.some((u) => u.dataHash === bExp.dataHash);
+            if (!alreadyLocal && bExp.dataCID) {
+              unified.push({
+                merchant: '🔒 Encriptado',
+                amount: 0,
+                date: new Date(bExp.timestamp * 1000).toISOString().split('T')[0],
+                category: 'otros',
+                txHash: '',
+                dataHash: bExp.dataHash,
+                dataCID: bExp.dataCID,
+                timestamp: bExp.timestamp * 1000,
+                source: 'blockchain',
+              });
+            }
           }
+        } catch {
+          // No wallet or network error — show local only
         }
-      } catch {
-        // No wallet — show local only
       }
 
       unified.sort((a, b) => b.timestamp - a.timestamp);
@@ -118,23 +130,73 @@ export default function HistoryPage() {
     setDecryptedImage(null);
   };
 
-  const signMessage = async (message: string): Promise<string> => {
-    const provider = isMiniPay()
-      ? (window as any).provider
-      : hasExternalWallet()
-        ? (window as any).ethereum
-        : null;
-    if (!provider) throw new Error('No wallet');
-    const account = await getAccount();
-    return await provider.request({
-      method: 'personal_sign',
-      params: [
-        `0x${Array.from(new TextEncoder().encode(message))
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join('')}`,
-        account,
-      ],
-    });
+  const decryptExpenseFromIPFS = async (expense: UnifiedExpense) => {
+    if (!expense.dataCID || !address) return;
+
+    setLoadingImage(true);
+    try {
+      // Check if we have the key locally
+      const hasKey = await hasEncryptionKey(address);
+
+      if (!hasKey) {
+        // Need to recover key — check if backup exists
+        const backupCID = await getBackupCID(address);
+        if (backupCID) {
+          // Ask for PIN to recover
+          setPendingDecryptExpense(expense);
+          setShowPinRecovery(true);
+          setLoadingImage(false);
+          return;
+        }
+        throw new Error('No se encontró clave de encriptación. No hay backup disponible.');
+      }
+
+      const encKey = await getEncryptionKey(address);
+      const encryptedData = await downloadFromIPFS(expense.dataCID);
+      const payload: ExpensePayload = await decryptPayload(encryptedData, encKey);
+
+      // Update the expense with decrypted data
+      expense.merchant = payload.merchant;
+      expense.amount = payload.amount;
+      expense.date = payload.date;
+      expense.category = payload.category;
+      setDecryptedImage(payload.imageBase64);
+
+      // Force re-render
+      setSelectedExpense({ ...expense });
+      setExpenses([...expenses]);
+    } catch (err) {
+      console.warn('Failed to decrypt:', err);
+    } finally {
+      setLoadingImage(false);
+    }
+  };
+
+  const handlePinRecovery = async (pin: string) => {
+    if (!address) return;
+    setPinError('');
+
+    const backupCID = await getBackupCID(address);
+    if (!backupCID) {
+      setPinError('No se encontró backup');
+      return;
+    }
+
+    // Download and decode backup
+    const backupBase64 = await downloadFromIPFS(backupCID);
+    const backupData = atob(backupBase64);
+
+    // Recover key (throws if wrong PIN)
+    await recoverKeyFromBackup(address, pin, backupData);
+
+    setShowPinRecovery(false);
+    setPinError('');
+
+    // Now decrypt the pending expense
+    if (pendingDecryptExpense) {
+      await handleExpenseClick(pendingDecryptExpense);
+      setPendingDecryptExpense(null);
+    }
   };
 
   const handleExpenseClick = async (expense: UnifiedExpense) => {
@@ -149,28 +211,7 @@ export default function HistoryPage() {
 
     // If blockchain expense with CID, decrypt from IPFS
     if (expense.dataCID && expense.source === 'blockchain') {
-      setLoadingImage(true);
-      try {
-        const account = await getAccount();
-        const encKey = await getEncryptionKey(signMessage, account);
-        const encryptedData = await downloadFromIPFS(expense.dataCID);
-        const payload: ExpensePayload = await decryptPayload(encryptedData, encKey);
-
-        // Update the expense with decrypted data
-        expense.merchant = payload.merchant;
-        expense.amount = payload.amount;
-        expense.date = payload.date;
-        expense.category = payload.category;
-        setDecryptedImage(payload.imageBase64);
-
-        // Force re-render
-        setSelectedExpense({ ...expense });
-        setExpenses([...expenses]);
-      } catch (err) {
-        console.warn('Failed to decrypt:', err);
-      } finally {
-        setLoadingImage(false);
-      }
+      await decryptExpenseFromIPFS(expense);
     }
   };
 
@@ -179,6 +220,15 @@ export default function HistoryPage() {
   return (
     <div className="min-h-screen">
       <Header title="Historial" subtitle="Todos tus gastos registrados" />
+
+      {/* PIN Recovery Modal */}
+      {showPinRecovery && (
+        <PinModal
+          mode="recover"
+          onSubmit={handlePinRecovery}
+          error={pinError}
+        />
+      )}
 
       <div className="px-5 py-4 overflow-x-auto">
         <div className="flex gap-2">

@@ -2,19 +2,28 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAccount } from 'wagmi';
 import Header from '@/components/Header';
 import CategorySelector from '@/components/CategorySelector';
 import BlockchainBadge from '@/components/BlockchainBadge';
+import PinModal from '@/components/PinModal';
 import { processReceipt, suggestCategory, type ReceiptData } from '@/lib/ocr';
 import { generateExpenseHash, registerExpense } from '@/lib/blockchain';
 import { saveReceipt } from '@/lib/storage';
-import { getAccount, isMiniPay, hasExternalWallet } from '@/lib/wallet';
-import { encryptPayload, getEncryptionKey, type ExpensePayload } from '@/lib/encryption';
+import {
+  getEncryptionKey,
+  encryptPayload,
+  hasPinBackup,
+  createPinBackup,
+  saveBackupCID,
+  type ExpensePayload,
+} from '@/lib/encryption';
 import { uploadToIPFS } from '@/lib/ipfs';
 import type { ReceiptRecord } from '@/lib/storage';
 
 export default function ScanPage() {
   const router = useRouter();
+  const { address } = useAccount();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
 
@@ -30,6 +39,9 @@ export default function ScanPage() {
   const [registrationError, setRegistrationError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [progressText, setProgressText] = useState('');
+  const [imageExpanded, setImageExpanded] = useState(false);
+  const [showPinSetup, setShowPinSetup] = useState(false);
+  const [pendingRecord, setPendingRecord] = useState<ReceiptRecord | null>(null);
 
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -79,26 +91,6 @@ export default function ScanPage() {
     }
   };
 
-  const signMessage = async (message: string): Promise<string> => {
-    const provider = isMiniPay()
-      ? (window as any).provider
-      : hasExternalWallet()
-        ? (window as any).ethereum
-        : null;
-    if (!provider) throw new Error('No wallet available for signing');
-    const account = await getAccount();
-    const signature = await provider.request({
-      method: 'personal_sign',
-      params: [
-        `0x${Array.from(new TextEncoder().encode(message))
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join('')}`,
-        account,
-      ],
-    });
-    return signature;
-  };
-
   const handleConfirmAndRegister = async () => {
     setIsRegistering(true);
     setRegistrationError('');
@@ -118,21 +110,15 @@ export default function ScanPage() {
         return;
       }
 
-      // Get account
-      let account = '';
-      try {
-        account = await getAccount();
-      } catch {
-        account = '0x0000000000000000000000000000000000000000';
-      }
+      const account = address || '0x0000000000000000000000000000000000000000';
 
       // Step A: Generate hash (proof of expense)
       setProgressText('Generando hash...');
       const dataHash = generateExpenseHash(amount, editedDate, editedMerchant, account);
 
-      // Step B: Encrypt ALL data (text + image) into one payload
+      // Step B: Encrypt ALL data — no signature needed, key auto-generated
       setProgressText('Encriptando datos...');
-      const encKey = await getEncryptionKey(signMessage, account);
+      const encKey = await getEncryptionKey(account);
 
       const payload: ExpensePayload = {
         merchant: editedMerchant,
@@ -170,6 +156,16 @@ export default function ScanPage() {
       };
       await saveReceipt(record);
 
+      // Step F: Check if PIN backup is configured; if not, prompt
+      const hasBackup = await hasPinBackup(account);
+      if (!hasBackup) {
+        setPendingRecord(record);
+        setShowPinSetup(true);
+        setProgressText('');
+        setIsRegistering(false);
+        return;
+      }
+
       setSuccessMessage('✓ Gasto registrado exitosamente');
       setProgressText('');
 
@@ -186,6 +182,24 @@ export default function ScanPage() {
     }
   };
 
+  const handlePinSetup = async (pin: string) => {
+    const account = address || '0x0000000000000000000000000000000000000000';
+    const backupData = await createPinBackup(account, pin);
+    const cid = await uploadToIPFS(btoa(backupData));
+    if (cid) {
+      await saveBackupCID(account, cid);
+    }
+    setShowPinSetup(false);
+    setSuccessMessage('✓ Gasto registrado y PIN configurado');
+    setTimeout(() => router.push('/'), 2000);
+  };
+
+  const handlePinSkip = () => {
+    setShowPinSetup(false);
+    setSuccessMessage('✓ Gasto registrado exitosamente');
+    setTimeout(() => router.push('/'), 2000);
+  };
+
   const handleCancel = () => {
     setStep(0);
     setImageData('');
@@ -197,6 +211,7 @@ export default function ScanPage() {
     setRegistrationError('');
     setSuccessMessage('');
     setProgressText('');
+    setImageExpanded(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (galleryInputRef.current) galleryInputRef.current.value = '';
   };
@@ -210,6 +225,15 @@ export default function ScanPage() {
           else handleCancel();
         }}
       />
+
+      {/* PIN Setup Modal */}
+      {showPinSetup && (
+        <PinModal
+          mode="setup"
+          onSubmit={handlePinSetup}
+          onSkip={handlePinSkip}
+        />
+      )}
 
       {step === 0 && (
         <div className="px-5 py-6">
@@ -260,6 +284,38 @@ export default function ScanPage() {
             <div className="bg-green-50 rounded-lg p-4 mb-4 text-green-700 text-sm font-medium">{successMessage}</div>
           )}
 
+          {/* Receipt image thumbnail — collapsible */}
+          {imageData && (
+            <div className="mb-4">
+              <button
+                onClick={() => setImageExpanded(!imageExpanded)}
+                className="w-full flex items-center justify-between bg-gray-50 rounded-xl p-3 transition-colors active:bg-gray-100"
+              >
+                <div className="flex items-center gap-3">
+                  <img
+                    src={imageData}
+                    alt="Recibo"
+                    className="w-12 h-16 object-cover rounded-lg border border-gray-200"
+                  />
+                  <span className="text-sm font-medium text-[#1E3A2F]">Foto del recibo</span>
+                </div>
+                <span className="text-gray-400 text-lg">
+                  {imageExpanded ? '▲' : '▼'}
+                </span>
+              </button>
+
+              {imageExpanded && (
+                <div className="mt-2 rounded-xl overflow-hidden border border-gray-200">
+                  <img
+                    src={imageData}
+                    alt="Recibo completo"
+                    className="w-full max-h-80 object-contain bg-gray-50"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="mb-6">
             {receiptData.confidence >= 70 ? (
               <div className="inline-block bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-medium">✓ OCR exitoso</div>
@@ -304,7 +360,7 @@ export default function ScanPage() {
 
           {/* Privacy notice */}
           <div className="bg-blue-50 rounded-lg p-3 mb-4">
-            <p className="text-xs text-blue-700">🔒 Tus datos se encriptan antes de guardarse. Solo tú puedes verlos con tu wallet.</p>
+            <p className="text-xs text-blue-700">🔒 Tus datos se encriptan automáticamente antes de guardarse. Solo tú puedes verlos.</p>
           </div>
 
           {registrationError && (

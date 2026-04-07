@@ -22,14 +22,24 @@ export interface ReceiptRecord {
 }
 
 const DB_NAME = 'receiptchain-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'receipts';
+const KEY_STORE_NAME = 'encryption-keys';
+
+/**
+ * Shape of an encryption key record in IndexedDB
+ */
+export interface KeyRecord {
+  rawKey: string;       // Base64-encoded AES-256 key
+  createdAt: number;
+  backupCID?: string;   // IPFS CID of PIN-encrypted backup
+}
 
 let dbInstance: IDBPDatabase<unknown> | null = null;
 
 /**
  * Initialize the database connection
- * Creates object store if it doesn't exist
+ * Creates object stores if they don't exist
  */
 export async function initDB(): Promise<IDBPDatabase<unknown>> {
   if (dbInstance) {
@@ -39,18 +49,22 @@ export async function initDB(): Promise<IDBPDatabase<unknown>> {
   try {
     dbInstance = await openDB(DB_NAME, DB_VERSION, {
       upgrade(db) {
-        // Create object store if it doesn't exist
+        // Receipts store
         if (!db.objectStoreNames.contains(STORE_NAME)) {
           const store = db.createObjectStore(STORE_NAME, {
             keyPath: 'id',
             autoIncrement: true,
           });
 
-          // Create indexes for efficient querying
           store.createIndex('timestamp', 'timestamp', { unique: false });
           store.createIndex('date', 'date', { unique: false });
           store.createIndex('category', 'category', { unique: false });
           store.createIndex('txHash', 'txHash', { unique: true });
+        }
+
+        // Encryption keys store (new in v2)
+        if (!db.objectStoreNames.contains(KEY_STORE_NAME)) {
+          db.createObjectStore(KEY_STORE_NAME);
         }
       },
     });
@@ -61,6 +75,22 @@ export async function initDB(): Promise<IDBPDatabase<unknown>> {
       `Failed to initialize database: ${error instanceof Error ? error.message : String(error)}`
     );
   }
+}
+
+/**
+ * Key store interface for encryption.ts
+ * Provides get/put operations keyed by wallet address
+ */
+export async function getKeyStore() {
+  const db = await initDB();
+  return {
+    async get(address: string): Promise<KeyRecord | undefined> {
+      return db.get(KEY_STORE_NAME, address.toLowerCase()) as Promise<KeyRecord | undefined>;
+    },
+    async put(address: string, record: KeyRecord): Promise<void> {
+      await db.put(KEY_STORE_NAME, record, address.toLowerCase());
+    },
+  };
 }
 
 /**
