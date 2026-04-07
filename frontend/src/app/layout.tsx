@@ -35,6 +35,7 @@ export default function RootLayout({
     <html lang="es">
       <head>
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <meta name="talentapp:project_verification" content="462260880c5e19ae4c0992e7049b24ca655f0e2d806892601f28598d009af41b0c9fadd2672feb0bfea48de6f2c1c1f72b8fae52a83311a33bb8e82cb395457a" />
       </head>
       <body className="min-h-screen bg-[#F7FBF9]" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
         <GoogleAnalytics />
