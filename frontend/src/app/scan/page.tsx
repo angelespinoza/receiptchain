@@ -131,27 +131,25 @@ export default function ScanPage() {
       const dataHash = generateExpenseHash(amount, editedDate, editedMerchant, account);
 
       // Step B: Encrypt ALL data (text + image) into one payload
-      let dataCID = '';
       setProgressText('Encriptando datos...');
-      try {
-        const encKey = await getEncryptionKey(signMessage, account);
+      const encKey = await getEncryptionKey(signMessage, account);
 
-        const payload: ExpensePayload = {
-          merchant: editedMerchant,
-          amount,
-          date: editedDate,
-          category: selectedCategory,
-          imageBase64: imageData,
-        };
+      const payload: ExpensePayload = {
+        merchant: editedMerchant,
+        amount,
+        date: editedDate,
+        category: selectedCategory,
+        imageBase64: imageData,
+      };
 
-        const encryptedData = await encryptPayload(payload, encKey);
+      const encryptedData = await encryptPayload(payload, encKey);
 
-        // Step C: Upload encrypted payload to IPFS
-        setProgressText('Subiendo a IPFS...');
-        dataCID = await uploadToIPFS(encryptedData);
-      } catch (err) {
-        console.warn('Encryption/IPFS failed, continuing without:', err);
-        // If encryption fails (no wallet), still register hash on-chain
+      // Step C: Upload encrypted payload to IPFS
+      setProgressText('Subiendo a IPFS...');
+      const dataCID = await uploadToIPFS(encryptedData);
+
+      if (!dataCID) {
+        throw new Error('No se pudo subir los datos a IPFS');
       }
 
       // Step D: Register on blockchain (only hash + CID, no personal data)

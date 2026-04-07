@@ -32,9 +32,9 @@ export async function POST(request: NextRequest) {
     const body: RelayRequest = await request.json();
     const { userAddress, dataHash, dataCID } = body;
 
-    if (!userAddress || !dataHash || !dataCID) {
+    if (!userAddress || !dataHash) {
       return NextResponse.json(
-        { error: 'Missing required fields: userAddress, dataHash, dataCID' },
+        { error: 'Missing required fields: userAddress, dataHash' },
         { status: 400 }
       );
     }
