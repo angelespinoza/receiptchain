@@ -8,6 +8,7 @@ import ExpenseCard from '@/components/ExpenseCard';
 import BottomNav from '@/components/BottomNav';
 import PinModal from '@/components/PinModal';
 import { getReceipts } from '@/lib/storage';
+import { exportToExcel } from '@/lib/export';
 import {
   getEncryptionKey,
   decryptPayload,
@@ -215,6 +216,12 @@ export default function HistoryPage() {
     }
   };
 
+  const handleExportExcel = async () => {
+    const localReceipts = await getReceipts();
+    if (localReceipts.length === 0) return;
+    exportToExcel(localReceipts);
+  };
+
   const explorerBaseUrl = CELO_CHAIN.blockExplorers?.default.url || 'https://celo-sepolia.celoscan.io';
 
   return (
@@ -230,19 +237,30 @@ export default function HistoryPage() {
         />
       )}
 
-      <div className="px-5 py-4 overflow-x-auto">
-        <div className="flex gap-2">
-          {(['todos', 'semana', 'mes'] as const).map((filter) => (
+      <div className="px-5 py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex gap-2 overflow-x-auto">
+            {(['todos', 'semana', 'mes'] as const).map((filter) => (
+              <button
+                key={filter}
+                onClick={() => handleFilterChange(filter)}
+                className={`px-4 py-2 rounded-full font-medium text-sm whitespace-nowrap transition-all ${
+                  activeFilter === filter ? 'bg-[#35D07F] text-white' : 'bg-gray-100 text-gray-700'
+                }`}
+              >
+                {filter === 'todos' ? 'Todos' : filter === 'semana' ? 'Semana' : 'Mes'}
+              </button>
+            ))}
+          </div>
+          {expenses.length > 0 && (
             <button
-              key={filter}
-              onClick={() => handleFilterChange(filter)}
-              className={`px-4 py-2 rounded-full font-medium text-sm whitespace-nowrap transition-all ${
-                activeFilter === filter ? 'bg-[#35D07F] text-white' : 'bg-gray-100 text-gray-700'
-              }`}
+              onClick={handleExportExcel}
+              className="ml-3 px-3 py-2 bg-[#1E3A2F] text-white rounded-full text-xs font-medium
+                         transition-opacity active:opacity-80 whitespace-nowrap flex items-center gap-1"
             >
-              {filter === 'todos' ? 'Todos' : filter === 'semana' ? 'Semana' : 'Mes'}
+              📊 Exportar
             </button>
-          ))}
+          )}
         </div>
       </div>
 

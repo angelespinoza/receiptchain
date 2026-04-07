@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import ClientProviders from '@/components/ClientProviders';
 import ServiceWorkerRegister from '@/components/ServiceWorkerRegister';
+import GoogleAnalytics from '@/components/GoogleAnalytics';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -36,6 +37,7 @@ export default function RootLayout({
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
       </head>
       <body className="min-h-screen bg-[#F7FBF9]" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+        <GoogleAnalytics />
         <ClientProviders>
           <div className="max-w-md mx-auto pb-20">{children}</div>
         </ClientProviders>

@@ -146,6 +146,17 @@ export default function PinModal({ mode, onSubmit, onSkip, error }: PinModalProp
         {step === 'enter' && renderPinInputs(pin, setPin, inputRefs)}
         {step === 'confirm' && renderPinInputs(confirmPin, setConfirmPin, confirmRefs)}
 
+        {/* Warning message — only shown during setup */}
+        {mode === 'setup' && step === 'enter' && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mt-4">
+            <p className="text-xs text-amber-800 font-medium leading-relaxed">
+              ⚠️ Si cambias de dispositivo o borras los datos del navegador, necesitarás este PIN para recuperar tus gastos.
+              Sin el PIN, no será posible acceder a tu historial encriptado.
+              <span className="font-bold"> Guárdalo en un lugar seguro.</span>
+            </p>
+          </div>
+        )}
+
         {/* Error */}
         {displayError && (
           <p className="text-red-500 text-sm text-center mt-3">{displayError}</p>
